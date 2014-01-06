@@ -139,7 +139,9 @@ Target "NuGet" (fun _ ->
             OutputPath = "nuget"
             AccessKey = getBuildParamOrDefault "nugetkey" ""
             Publish = hasBuildParam "nugetkey"
-            Dependencies = [ "AWSSDK",  GetPackageVersion "packages" "AWSSDK" ] })
+            Dependencies = 
+                [ "AWSSDK",  GetPackageVersion "packages" "AWSSDK"
+                  "log4net", GetPackageVersion "packages" "log4net" ] })
         ("nuget/" + project + ".nuspec")
 )
 
