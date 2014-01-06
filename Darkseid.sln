@@ -14,6 +14,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project", "project", "{B861
 	ProjectSection(SolutionItems) = preProject
 		build.fsx = build.fsx
 		nuget\Darkseid.nuspec = nuget\Darkseid.nuspec
+		README.md = README.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{BCD04360-E29D-4169-8EFD-D4F96DA29098}"
