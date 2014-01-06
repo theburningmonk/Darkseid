@@ -3,6 +3,7 @@
 open System
 
 open Amazon.Kinesis.Model
+open Amazon.CloudWatch
 open Amazon.CloudWatch.Model
 
 type OptimizationMode =
@@ -15,13 +16,16 @@ type HighWaterMarksMode =
 
 type DarkseidConfig () =
     /// Maximum amount of backlog allowed to build up before we take preventative actions. Default is 1000.
-    member val HighWaterMarks     = 1000 with get, set
+    member val HighWaterMarks       = 1000 with get, set
 
     /// What to do when the high water marks has been reached. Default is to drop data.
-    member val HighWaterMarksMode = HighWaterMarksMode.DropData with get, set
+    member val HighWaterMarksMode   = HighWaterMarksMode.DropData with get, set
 
     /// The amount of concurrency for writing to the Kinesis stream. Default is 10.
-    member val LevelOfConcurrency = 10u with get, set
+    member val LevelOfConcurrency   = 10u with get, set
+
+    /// The max number of attempts allowed for putting a record into the stream. Default is 3.
+    member val MaxPutRecordAttempts = 3 with get, set
 
 type Record =
     {
@@ -34,7 +38,11 @@ module Exceptions =
     do ()
     
 [<AutoOpen>]
-module internal InternalModel =
+module internal InternalModel =    
+    type Result<'Success, 'Failure> =
+        | Success   of 'Success
+        | Failure   of 'Failure
+
     type GodfreyMessage =
         | Send of Record * AsyncReplyChannel<unit>
 
@@ -46,6 +54,7 @@ module internal InternalModel =
             Dimensions      : Dimension[]
             MetricName      : string
             Timestamp       : DateTime
+            Unit            : StandardUnit
             mutable Average : double
             mutable Sum     : double
             mutable Max     : double
@@ -53,11 +62,12 @@ module internal InternalModel =
             mutable Count   : double
         }
 
-        static member Init (timestamp : DateTime, dimensions : Dimension[], metricName, n) =
+        static member Init (timestamp : DateTime, dimensions : Dimension[], unit, metricName, n) =
             { 
                 Dimensions  = dimensions
                 MetricName  = metricName
                 Timestamp   = timestamp
+                Unit        = unit
                 Average     = n
                 Sum         = n
                 Max         = n
@@ -77,5 +87,5 @@ module internal InternalModel =
             metric.Average <- metric.Sum / metric.Count
 
     type VirmanMessage =
-        | IncrCount of DateTime * Dimension[] * string * int
-        | Flush     of AsyncReplyChannel<Metric[]>
+        | IncrMetric    of DateTime * Dimension[] * StandardUnit * string * int
+        | Flush         of AsyncReplyChannel<Metric[]>

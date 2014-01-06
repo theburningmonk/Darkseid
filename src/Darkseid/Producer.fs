@@ -8,6 +8,7 @@ open System.Security.Cryptography
 open System.Threading
 open System.Timers
 
+open Amazon
 open Amazon.CloudWatch
 open Amazon.CloudWatch.Model
 open Amazon.Kinesis
@@ -18,7 +19,8 @@ open Checked
 open Darkseid.Model
 open Darkseid.Utils
 
-type internal VirmanVundabar (cloudWatch : IAmazonCloudWatch,
+type internal VirmanVundabar (kinesis    : IAmazonKinesis,
+                              cloudWatch : IAmazonCloudWatch,
                               config     : DarkseidConfig,
                               appName    : string,
                               streamName : string,
@@ -26,15 +28,12 @@ type internal VirmanVundabar (cloudWatch : IAmazonCloudWatch,
     let loggerName = sprintf "VirmanVundabar[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
 
-    // this metric name and dimensions would make our custom metrics go into the same place as the rest of the Kinesis metrics
-    let metricNs, streamMetricDim, shardMetricDim = "AWS/Kinesis", "StreamName", "ShardId"
-    let sendMetricName, throttledMetricName = "PutRecord.Success", "PutRecord.Throttled"
+    let streamDim  = new Dimension(Name = CloudWatchUtils.streamDimensionName, Value = streamName)
+    let streamDims = [| streamDim |]
 
-    let streamDimensions = [| new Dimension(Name = streamMetricDim, Value = streamName) |]
-
-    let getShardDimensions =
-        let getInternal shardId = [| new Dimension(Name = streamMetricDim, Value = streamName)
-                                     new Dimension(Name = shardMetricDim,  Value = shardId) |]
+    let getShardDims =
+        let getInternal shardId = [| new Dimension(Name = CloudWatchUtils.streamDimensionName, Value = streamName)
+                                     new Dimension(Name = CloudWatchUtils.shardDimensionName,  Value = shardId) |]
         memoize getInternal
 
     let body (inbox : Agent<VirmanMessage>) =
@@ -48,13 +47,13 @@ type internal VirmanVundabar (cloudWatch : IAmazonCloudWatch,
             while true do
                 let! msg = inbox.Receive()
                 match msg with
-                | IncrCount(timestamp, dims, metricName, count) ->
+                | IncrMetric(timestamp, dims, unit, metricName, n) ->
                     let periodId = getPeriodId timestamp
                     let key = periodId, metricName
                     match metricsData.TryGetValue key with
-                    | true, metric -> metric.AddDatapoint(double count)
+                    | true, metric -> metric.AddDatapoint(double n)
                     | _ -> let timestamp = getMinuteTimestamp periodId
-                           metricsData.[key] <- Metric.Init(timestamp, dims, metricName, double count)
+                           metricsData.[key] <- Metric.Init(timestamp, dims, unit, metricName, double n)
                 | Flush(reply) ->
                     reply.Reply(metricsData.Values |> Seq.toArray)
                     metricsData.Clear()
@@ -65,21 +64,67 @@ type internal VirmanVundabar (cloudWatch : IAmazonCloudWatch,
     let pushMetrics = 
         async {
             let! metrics = agent.PostAndAsyncReply Flush
-            do! CloudWatchUtils.pushMetrics cloudWatch metricNs metrics
+            do! CloudWatchUtils.pushMetrics cloudWatch metrics
         }
 
-    let timer = new Timer(TimeSpan.FromMinutes(1.0).TotalMilliseconds)
-    do timer.Elapsed.Add(fun _ -> Async.Start(pushMetrics, cts.Token))
-    do timer.Start()
+    let splitBusiestShard = 
+        async {
+            let! res = KinesisUtils.getShards kinesis streamName
+            match res with
+            | Success("ACTIVE", shards, shardIds) -> 
+                // look at both the send request count and total bytes sent to determine the shard that is closest to the limits
+                // imposed by Kinesis
+                let! sendAvg = CloudWatchUtils.getAvgShardMetrics cloudWatch streamDim shardIds CloudWatchUtils.sendMetricName
+                let! sizeAvg = CloudWatchUtils.getAvgShardMetrics cloudWatch streamDim shardIds CloudWatchUtils.sizeMetricName
+
+                match sendAvg, sizeAvg with
+                | Failure exn, _ | _, Failure exn -> 
+                    logger.Error("Couldn't retrieve CloudWatch metrics for the shards. Cannot determine which shard to split right now.", exn)
+                | Success sendMetrics, Success sizeMetrics -> 
+                    let busiestShardId = shardIds |> Seq.maxBy (fun shardId -> 
+                        // NOTE : the metrics are per minute but the limitations are per second, hence the need to divide by 60
+                        let sendPerc = (sendMetrics |> Map.getOrDefault shardId 0.0) / 60.0 / KinesisUtils.maxPutRequestsPerSecond
+                        let sizePerc = (sizeMetrics |> Map.getOrDefault shardId 0.0) / 60.0 / KinesisUtils.maxPutBytesPerSecond                        
+                        max sendPerc sizePerc)
+
+                    logger.DebugFormat("Shard [{0}] is the busiest shard at the moment, attempting to split it.", busiestShardId)
+                    let shard = shards |> Seq.find (fun shard -> shard.ShardId = busiestShardId)
+                    do! KinesisUtils.splitShard kinesis streamName shard
+            | Success(status, _, _) 
+                -> logger.WarnFormat("Stream is currenty in [{0}] status. Stream needs to be ACTIVE status to split shards.", status)
+            | Failure exn 
+                -> logger.Error("Couldn't retrieve current list of shards. Cannot determine which shard to split right now.", exn)
+        }
+
+    let checkThrottles =
+        async {
+            let! res = CloudWatchUtils.getAvgStreamMetric cloudWatch streamDim CloudWatchUtils.throttledMetricName
+            match res with
+            | Success avgThrottle -> 
+                if avgThrottle > 100.0 then do! splitBusiestShard
+            | Failure exn -> logger.Error(sprintf "Couldn't get throttle metrics for the stream [%s]" streamName, exn)
+        }
+
+    let startTimer onElapsed (interval : TimeSpan)  = 
+        let timer = new Timer(interval.TotalMilliseconds)
+        do timer.Elapsed.Add onElapsed
+        do timer.Start() 
+        timer
+
+    let pushTimer  = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(pushMetrics, cts.Token))
+    let splitTimer = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(checkThrottles, cts.Token))
+    let mergeTimer = TimeSpan.FromMinutes(5.0) |> startTimer (fun _ -> ())
 
     member this.TrackThrottledSend (partitionKey : string) = 
-        agent.Post <| IncrCount(DateTime.UtcNow, streamDimensions, throttledMetricName, 1)
+        agent.Post <| IncrMetric(DateTime.UtcNow, streamDims, StandardUnit.Count, CloudWatchUtils.throttledMetricName, 1)
 
     member this.TrackSuccessfulSend (shardId : string, payloadSize : int) = 
-        let dimensions = getShardDimensions shardId
-        agent.Post <| IncrCount(DateTime.UtcNow, dimensions, sendMetricName, 1)
+        let shardDims = getShardDims shardId
+        agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Count, CloudWatchUtils.sendMetricName, 1)
+        agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Bytes, CloudWatchUtils.sizeMetricName, payloadSize)
 
-type internal AeroTrooper (kinesis    : IAmazonKinesis, 
+type internal AeroTrooper (kinesis    : IAmazonKinesis,
+                           config     : DarkseidConfig, 
                            appName    : string,
                            streamName : string,
                            cts        : CancellationTokenSource) =
@@ -88,27 +133,31 @@ type internal AeroTrooper (kinesis    : IAmazonKinesis,
     
     let successEvent   = new Event<string * int>()
     let errorEvent     = new Event<Exception>()
+    let failedEvent    = new Event<Record>()
     let throttledEvent = new Event<string>()
     
     let rec send record attempts =
-        async {
-            try
-                use memStream = new MemoryStream(record.Data)
-                let  req = new PutRecordRequest(Data = memStream, PartitionKey = record.PartitionKey)
-                let! res = kinesis.PutRecordAsync(req, cts.Token) |> Async.AwaitTask
-                successEvent.Trigger(res.ShardId, record.Data.Length)
-            with
-            | Flatten (:? ProvisionedThroughputExceededException as exn) ->
-                throttledEvent.Trigger(record.PartitionKey)
-                logger.Warn(sprintf "PutRecord request attempt [%d] is throttled, retrying in 100ms..." attempts, exn)
+        async {            
+            if attempts >= config.MaxPutRecordAttempts 
+            then failedEvent.Trigger(record)
+            else
+                try
+                    use memStream = new MemoryStream(record.Data)
+                    let  req = new PutRecordRequest(StreamName = streamName, Data = memStream, PartitionKey = record.PartitionKey)
+                    let! res = kinesis.PutRecordAsync(req, cts.Token) |> Async.AwaitTask
+                    successEvent.Trigger(res.ShardId, record.Data.Length)
+                with
+                | Flatten (:? ProvisionedThroughputExceededException as exn) ->
+                    throttledEvent.Trigger(record.PartitionKey)
+                    logger.Warn(sprintf "PutRecord request attempt [%d] is throttled, retrying in 100ms..." attempts, exn)
 
-                do! Async.Sleep 100
-                do! send record (attempts + 1)
-            | Flatten exn ->
-                errorEvent.Trigger(exn)
-                logger.Warn(sprintf "PutRecord request attempt [%d] encountered an error, retrying..." attempts, exn)
+                    do! Async.Sleep 100
+                    do! send record (attempts + 1)
+                | Flatten exn ->
+                    errorEvent.Trigger(exn)
+                    logger.Warn(sprintf "PutRecord request attempt [%d] encountered an error, retrying..." attempts, exn)
 
-                do! send record (attempts + 1)
+                    do! send record (attempts + 1)
         }
 
     let body (inbox : Agent<AeroTrooperMessage>) =
@@ -149,7 +198,7 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
         n % partitions
 
     let genTrooper _ = 
-        let trooper = new AeroTrooper(kinesis, appName, streamName, cts)
+        let trooper = new AeroTrooper(kinesis, config, appName, streamName, cts)
         trooper.OnSuccess.Add(fun (shardId, payloadSize) -> 
             decrBacklog()
             virman.TrackSuccessfulSend(shardId, payloadSize))
@@ -204,7 +253,31 @@ type Producer private (kinesis      : IAmazonKinesis,
 
     let cts = new CancellationTokenSource()
  
-    let virman  = new VirmanVundabar(cloudWatch, config, appName, streamName, cts)
+    let virman  = new VirmanVundabar(kinesis, cloudWatch, config, appName, streamName, cts)
     let godfrey = new GloriousGodfrey(kinesis, config, appName, streamName, cts, virman)
 
     member this.Send (record : Record) = godfrey.Send(record)
+    
+    static member CreateNew(awsKey    : string, 
+                            awsSecret : string, 
+                            region    : RegionEndpoint, 
+                            appName, streamName) =
+        let config     = new DarkseidConfig()
+        let kinesis    = AWSClientFactory.CreateAmazonKinesisClient(awsKey, awsSecret, region)
+        let cloudWatch = AWSClientFactory.CreateAmazonCloudWatchClient(awsKey, awsSecret, region)
+        new Producer(kinesis, cloudWatch, config, appName, streamName)
+
+    static member CreateNew(awsKey    : string, 
+                            awsSecret : string, 
+                            region    : RegionEndpoint, 
+                            appName, streamName, config) =
+        let kinesis    = AWSClientFactory.CreateAmazonKinesisClient(awsKey, awsSecret, region)
+        let cloudWatch = AWSClientFactory.CreateAmazonCloudWatchClient(awsKey, awsSecret, region)
+        new Producer(kinesis, cloudWatch, config, appName, streamName)
+
+    static member CreateNew(kinesis, cloudWatch, appName, streamName) =
+        let config = new DarkseidConfig()
+        new Producer(kinesis, cloudWatch, config, appName, streamName)
+
+    static member CreateNew(kinesis, cloudWatch, appName, streamName, config) =
+        new Producer(kinesis, cloudWatch, config, appName, streamName)
