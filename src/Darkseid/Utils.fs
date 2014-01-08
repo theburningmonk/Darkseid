@@ -73,19 +73,23 @@ module internal Utils =
             loop 0
 
     module Seq =
-        let batch batchSize elems = 
-            elems 
-            |> Seq.mapi (fun i x -> i / batchSize, x) 
-            |> Seq.groupBy fst
-            |> Seq.map (fun (_, gr) -> gr |> Seq.map snd)
-
-    module Array =
-        let batch batchSize elems = 
-            elems 
-            |> Seq.mapi (fun i x -> i / batchSize, x) 
-            |> Seq.groupBy fst
-            |> Seq.map (fun (_, gr) -> gr |> Seq.map snd |> Seq.toArray)
-            |> Seq.toArray
+        // originaly from http://fssnip.net/1o
+        let groupsOfAtMost (size: int) (s: seq<'v>) =
+            seq {
+                let en = s.GetEnumerator ()
+                let more = ref true
+                while !more do
+                    let group =
+                        [|
+                            let i = ref 0
+                            while !i < size && en.MoveNext () do
+                                yield en.Current
+                                i := !i + 1
+                        |]
+                    if group.Length = 0 
+                    then more := false
+                    else yield group
+            }
 
     module Map =
         let getOrDefault key defaultVal (map : Map<'a, 'b>) =
@@ -140,7 +144,7 @@ module internal CloudWatchUtils =
 
     /// Push a bunch of metrics
     let pushMetrics (cloudWatch : IAmazonCloudWatch) (metrics : Metric[]) =
-        let groups   = metrics |> Array.batch batchSize
+        let groups   = metrics |> Seq.groupsOfAtMost batchSize |> Seq.toArray
         let requests = groups |> Array.map (fun metrics -> 
             let req  = new PutMetricDataRequest(Namespace = metricNamespace)
             let data = metrics |> Seq.map (fun m -> 
