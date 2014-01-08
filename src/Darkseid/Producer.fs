@@ -132,7 +132,7 @@ type internal AeroTrooper (kinesis    : IAmazonKinesis,
     let logger     = LogManager.GetLogger loggerName
     
     let successEvent   = new Event<string * int>()
-    let errorEvent     = new Event<Exception>()
+    let errorEvent     = new Event<Record * Exception>()
     let failedEvent    = new Event<Record>()
     let throttledEvent = new Event<string>()
     
@@ -154,7 +154,7 @@ type internal AeroTrooper (kinesis    : IAmazonKinesis,
                     do! Async.Sleep 100
                     do! send record (attempts + 1)
                 | Flatten exn ->
-                    errorEvent.Trigger(exn)
+                    errorEvent.Trigger(record, exn)
                     logger.Warn(sprintf "PutRecord request attempt [%d] encountered an error, retrying..." attempts, exn)
 
                     do! send record (attempts + 1)
@@ -185,6 +185,8 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
     let loggerName = sprintf "GloriousGodfrey[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
 
+    let errorEvent = new Event<Record * Exception>()
+
     let backlogSize = 0
     let incrBacklog () = Interlocked.Increment(ref backlogSize) |> ignore
     let decrBacklog () = Interlocked.Decrement(ref backlogSize) |> ignore
@@ -203,6 +205,7 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
             decrBacklog()
             virman.TrackSuccessfulSend(shardId, payloadSize))
         trooper.OnThrottled.Add(virman.TrackThrottledSend)
+        trooper.OnError.Add(errorEvent.Trigger)
 
         trooper
 
@@ -251,6 +254,8 @@ type Producer private (kinesis      : IAmazonKinesis,
     let loggerName = sprintf "Darkseid[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
 
+    let errorEvent = new Event<Record * Exception>()
+
     let cts = new CancellationTokenSource()
  
     let virman  = new VirmanVundabar(kinesis, cloudWatch, config, appName, streamName, cts)
@@ -281,3 +286,5 @@ type Producer private (kinesis      : IAmazonKinesis,
 
     static member CreateNew(kinesis, cloudWatch, appName, streamName, config) =
         new Producer(kinesis, cloudWatch, config, appName, streamName)
+
+    [<CLIEvent>] member this.OnError = errorEvent.Publish
