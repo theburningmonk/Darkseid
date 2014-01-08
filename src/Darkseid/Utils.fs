@@ -2,6 +2,9 @@
 
 open System
 open System.Collections.Generic
+open System.IO
+open System.Threading
+open System.Threading.Tasks
 
 open Amazon.CloudWatch
 open Amazon.CloudWatch.Model
@@ -17,6 +20,14 @@ type Agent<'T> = MailboxProcessor<'T>
 
 [<AutoOpen>]
 module internal Utils =
+    let validateConfig (config : DarkseidConfig) =
+        match config.Mode with
+        | Background bgConfig -> 
+            match bgConfig.HighWaterMarksMode with
+            | HighWaterMarksMode.DropData | HighWaterMarksMode.Block -> ()
+            | mode -> raise <| InvalidHighWaterMarksMode mode
+        | _ -> ()
+
     // since the async methods from the AWSSDK excepts with AggregateException which is not all that useful, hence
     // this active pattern which unwraps any AggregateException
     let rec (|Flatten|) (exn : Exception) =
@@ -55,6 +66,9 @@ module internal Utils =
     let inline csv (arr : 'a[]) = String.Join(",", arr)
 
     type Async with
+        /// Starts a computation as a plain task.
+        static member StartAsPlainTask (work : Async<unit>) = Task.Factory.StartNew(fun () -> work |> Async.RunSynchronously)
+
         /// Retries the async computation up to specified number of times. Optionally accepts a function to calculate
         /// the delay in milliseconds between retries, default is exponential delay with a backoff slot of 500ms.
         static member WithRetry (computation : Async<'a>, maxRetries, ?calcDelay) =
@@ -101,6 +115,17 @@ module internal KinesisUtils =
     let maxPutRequestsPerSecond = 1000.0
     let maxPutBytesPerSecond    = 1024.0 * 1024.0
     
+    /// Sends a record to a stream
+    let putRecord (kinesis : IAmazonKinesis) streamName (record : Record) (cts : CancellationTokenSource) =
+        async {
+            use memStream = new MemoryStream(record.Data)
+            let  req = new PutRecordRequest(StreamName = streamName, Data = memStream, PartitionKey = record.PartitionKey)
+            let! res = kinesis.PutRecordAsync(req, cts.Token) |> Async.AwaitTask |> Async.Catch
+            match res with
+            | Choice1Of2 res -> return Success res
+            | Choice2Of2 (Flatten exn) -> return Failure exn
+        }
+
     /// Returns the shards that are part of the stream
     let getShards (kinesis : IAmazonKinesis) streamName =
         async {

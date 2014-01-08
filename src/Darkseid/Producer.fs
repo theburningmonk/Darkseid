@@ -123,59 +123,6 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
         agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Count, CloudWatchUtils.sendMetricName, 1)
         agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Bytes, CloudWatchUtils.sizeMetricName, payloadSize)
 
-type internal AeroTrooper (kinesis    : IAmazonKinesis,
-                           config     : DarkseidConfig, 
-                           appName    : string,
-                           streamName : string,
-                           cts        : CancellationTokenSource) =
-    let loggerName = sprintf "AeroTrooper[AppName:%s, Stream:%s]" appName streamName
-    let logger     = LogManager.GetLogger loggerName
-    
-    let successEvent   = new Event<string * int>()
-    let errorEvent     = new Event<Record * Exception>()
-    let failedEvent    = new Event<Record>()
-    let throttledEvent = new Event<string>()
-    
-    let rec send record attempts =
-        async {            
-            if attempts >= config.MaxPutRecordAttempts 
-            then failedEvent.Trigger(record)
-            else
-                try
-                    use memStream = new MemoryStream(record.Data)
-                    let  req = new PutRecordRequest(StreamName = streamName, Data = memStream, PartitionKey = record.PartitionKey)
-                    let! res = kinesis.PutRecordAsync(req, cts.Token) |> Async.AwaitTask
-                    successEvent.Trigger(res.ShardId, record.Data.Length)
-                with
-                | Flatten (:? ProvisionedThroughputExceededException as exn) ->
-                    throttledEvent.Trigger(record.PartitionKey)
-                    logger.Warn(sprintf "PutRecord request attempt [%d] is throttled, retrying in 100ms..." attempts, exn)
-
-                    do! Async.Sleep 100
-                    do! send record (attempts + 1)
-                | Flatten exn ->
-                    errorEvent.Trigger(record, exn)
-                    logger.Warn(sprintf "PutRecord request attempt [%d] encountered an error, retrying..." attempts, exn)
-
-                    do! send record (attempts + 1)
-        }
-
-    let body (inbox : Agent<AeroTrooperMessage>) =
-        async {
-            while true do
-                let! msg = inbox.Receive()
-                match msg with | PutRecord record -> do! send record 1
-        }
-
-    let agent = Agent<AeroTrooperMessage>.Start(body, cts.Token)
-    do agent.Error.Add(fun exn -> logger.Warn("Encountered an unhandled error. Ignoring.", exn))
-
-    member this.OnSuccess   = successEvent.Publish
-    member this.OnError     = errorEvent.Publish
-    member this.OnThrottled = throttledEvent.Publish
-
-    member this.Send (record) = agent.Post <| PutRecord record
-
 type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
                                config     : DarkseidConfig,
                                appName    : string,
@@ -185,7 +132,10 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
     let loggerName = sprintf "GloriousGodfrey[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
 
-    let errorEvent = new Event<Record * Exception>()
+    let successEvent   = new Event<string * int>()
+    let errorEvent     = new Event<Record * Exception>()
+    let failedEvent    = new Event<Record>()
+    let throttledEvent = new Event<string>()
 
     let backlogSize = 0
     let incrBacklog () = Interlocked.Increment(ref backlogSize) |> ignore
@@ -199,60 +149,111 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
         let n = (uint32 hash.[3] <<< 24) ||| (uint32 hash.[2] <<< 16) ||| (uint32 hash.[1] <<< 8) ||| (uint32 hash.[0])
         n % partitions
 
-    let genTrooper _ = 
-        let trooper = new AeroTrooper(kinesis, config, appName, streamName, cts)
-        trooper.OnSuccess.Add(fun (shardId, payloadSize) -> 
-            decrBacklog()
-            virman.TrackSuccessfulSend(shardId, payloadSize))
-        trooper.OnThrottled.Add(virman.TrackThrottledSend)
-        trooper.OnError.Add(errorEvent.Trigger)
+    /// Attempts to send a record until the max number of attempts has been exceeded
+    let rec send record attempts =
+        async {
+            let! res = KinesisUtils.putRecord kinesis streamName record cts
+            match res with
+            | Success res ->
+                decrBacklog()
+                virman.TrackSuccessfulSend(res.ShardId, record.Data.Length)
+                successEvent.Trigger(res.ShardId, record.Data.Length)
+                return Success()
+            | Failure exn ->
+                match exn with
+                | :? ProvisionedThroughputExceededException ->
+                    throttledEvent.Trigger(record.PartitionKey)
+                    logger.Warn(sprintf "PutRecord request attempt [%d] is throttled, retrying in 100ms..." attempts, exn)
+                    do! Async.Sleep 100                    
+                | _ ->
+                    errorEvent.Trigger(record, exn)
+                    logger.Warn(sprintf "PutRecord request attempt [%d] encountered an error, retrying..." attempts, exn)
+                                        
+                if attempts >= config.MaxPutRecordAttempts 
+                then failedEvent.Trigger(record)
+                     return Failure exn
+                else return! send record (attempts + 1)
+        }
 
+    /// Generates an AeroTrooper (background worker) for doing the work of actually sending records to Kinesis
+    let genTrooper _ = 
+        let body (inbox : Agent<AeroTrooperMessage>) =
+            async {
+                while true do
+                    let! msg = inbox.Receive()
+                    match msg with
+                    | Put record -> do! send record 1 |> Async.Ignore
+                    | BlockingPut (record, reply) -> 
+                        let! res = send record 1
+                        reply.Reply(res)
+            }
+
+        let trooper = Agent<AeroTrooperMessage>.Start(body, cts.Token)
+        trooper.Error.Add(fun exn -> logger.Warn("Worker encountered an unhandled error. Ignoring.", exn))
         trooper
 
-    let body (inbox : Agent<GodfreyMessage>) =
-        let troopers = [| 1u..config.LevelOfConcurrency |] |> Array.map genTrooper
-
-        // employ a simple hashing algorithm to 
-        let send ({ PartitionKey = partitionKey } as record) =
-            let idx     = partitionKey |> System.Text.Encoding.UTF8.GetBytes |> hash config.LevelOfConcurrency |> int
-            let trooper = troopers.[idx]
-            trooper.Send(record)
-            incrBacklog()
-
+    /// agent for handling the background processing mode
+    let getBackgroundAgent (inbox       : Agent<GodfreyMessage>) 
+                           (bgConfig    : BackgroundProcessingConfig)
+                           (getTrooper  : Record -> Agent<AeroTrooperMessage>) = 
         async {
             while true do
                 let! msg = inbox.Receive()
                 match msg with
                 | Send (record, reply) -> 
-                    match backlogSize >= config.HighWaterMarks with
+                    match backlogSize >= bgConfig.HighWaterMarks with
                     | true ->
-                        match config.HighWaterMarksMode with
+                        match bgConfig.HighWaterMarksMode with
                         | HighWaterMarksMode.DropData -> 
-                            reply.Reply()
+                            reply.Reply(Success ())
                         | HighWaterMarksMode.Block    -> 
                             // block until we're below the high water mark
-                            while backlogSize >= config.HighWaterMarks do
+                            while backlogSize >= bgConfig.HighWaterMarks do
                                 do! Async.Sleep(10)
 
-                            send record
-                            reply.Reply()
-                        | x -> raise <| NotSupportedException(sprintf "Unknown HighWaterMarksMode [%O] is not supported." x)
-                    | _ -> send record
-                           reply.Reply()
+                            getTrooper(record).Post <| Put record
+                            incrBacklog()
+                            reply.Reply(Success ())
+                    | _ -> getTrooper(record).Post <| Put record
+                           incrBacklog()
+                           reply.Reply(Success ())
         }
+
+    /// agent for handling the blocking processing mode
+    let getBlockingAgent (inbox : Agent<GodfreyMessage>) (getTrooper  : Record -> Agent<AeroTrooperMessage>) =
+        async {
+            while true do
+                let! msg = inbox.Receive()
+                match msg with
+                | Send (record, reply) -> getTrooper(record).Post <| BlockingPut(record, reply)
+        }
+
+    let body (inbox : Agent<GodfreyMessage>) =
+        let troopers = [| 1u..config.LevelOfConcurrency |] |> Array.map genTrooper
+
+        // employ a simple hashing algorithm to find the trooper for this record
+        let nextTrooper { PartitionKey = partitionKey } =
+            let idx = partitionKey |> System.Text.Encoding.UTF8.GetBytes |> hash config.LevelOfConcurrency |> int
+            troopers.[idx]
+
+        match config.Mode with
+        | Background backgroundConfig -> getBackgroundAgent inbox backgroundConfig nextTrooper
+        | Blocking -> getBlockingAgent inbox nextTrooper
 
     let agent = Agent<GodfreyMessage>.Start(body, cts.Token)
     do agent.Error.Add(fun exn -> logger.Warn("Encountered an unhandled error. Ignoring.", exn))
 
-    member this.Send (record) = agent.PostAndReply (fun reply -> Send(record, reply))
+    member this.Send (record) = agent.PostAndAsyncReply (fun reply -> Send(record, reply))
 
 type Producer private (kinesis      : IAmazonKinesis,
                        cloudWatch   : IAmazonCloudWatch,
                        config       : DarkseidConfig,
                        appName      : string,
-                       streamName   : string) =    
+                       streamName   : string) =
     let loggerName = sprintf "Darkseid[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
+
+    do validateConfig config
 
     let errorEvent = new Event<Record * Exception>()
 
@@ -261,7 +262,14 @@ type Producer private (kinesis      : IAmazonKinesis,
     let virman  = new VirmanVundabar(kinesis, cloudWatch, config, appName, streamName, cts)
     let godfrey = new GloriousGodfrey(kinesis, config, appName, streamName, cts, virman)
 
-    member this.Send (record : Record) = godfrey.Send(record)
+    member this.Send (record : Record) = 
+        async {
+            let! res = godfrey.Send(record)
+            match res with
+            | Success _   -> ()
+            | Failure exn -> raise exn
+        }
+        |> Async.StartAsPlainTask
     
     static member CreateNew(awsKey    : string, 
                             awsSecret : string, 

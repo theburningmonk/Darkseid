@@ -6,21 +6,30 @@ open Amazon.Kinesis.Model
 open Amazon.CloudWatch
 open Amazon.CloudWatch.Model
 
-type OptimizationMode =
-    | Throughput       = 1
-    | PreserveOrdering = 2
-
 type HighWaterMarksMode =
     | Block     = 1
     | DropData  = 2
 
-type DarkseidConfig () =
+type BackgroundProcessingConfig () =
     /// Maximum amount of backlog allowed to build up before we take preventative actions. Default is 1000.
     member val HighWaterMarks       = 1000 with get, set
 
     /// What to do when the high water marks has been reached. Default is to drop data.
     member val HighWaterMarksMode   = HighWaterMarksMode.DropData with get, set
 
+type ProcessingMode = 
+    | Background    of BackgroundProcessingConfig
+    | Blocking
+
+type DarkseidConfig () =
+    /// How to process the send requests, the available modes are
+    ///  - Background : records are saved into Kinesis by a number of background workers, the send request
+    ///                 returns as soon as it's submitted into a managed backlog.
+    ///  - Blocking : records are saved into Kinesis straight away, and the send request returns as soon as
+    ///               the Kinesis request has completed.
+    /// The default is the background mode which ensures better throughput.
+    member val Mode = Background(new BackgroundProcessingConfig()) with get, set    
+    
     /// The amount of concurrency for writing to the Kinesis stream. Default is 10.
     member val LevelOfConcurrency   = 10u with get, set
 
@@ -35,7 +44,7 @@ type Record =
 
 [<AutoOpen>]
 module Exceptions =
-    do ()
+    exception InvalidHighWaterMarksMode of HighWaterMarksMode
     
 [<AutoOpen>]
 module internal InternalModel =    
@@ -44,10 +53,11 @@ module internal InternalModel =
         | Failure   of 'Failure
 
     type GodfreyMessage =
-        | Send of Record * AsyncReplyChannel<unit>
+        | Send of Record * AsyncReplyChannel<Result<unit, Exception>>
 
     type AeroTrooperMessage =
-        | PutRecord of Record
+        | Put         of Record
+        | BlockingPut of Record * AsyncReplyChannel<Result<unit, Exception>>
 
     type Metric = 
         {
