@@ -53,7 +53,6 @@ module internal Utils =
         memoizedFunc
 
     /// Default function for calcuating delay (in milliseconds) between retries, based on (http://en.wikipedia.org/wiki/Exponential_backoff)
-    /// TODO : can be memoized
     let private exponentialDelay =
         let calcInternal attempts = 
             let rec sum acc = function | 0 -> acc | n -> sum (acc + n) (n - 1)
@@ -128,19 +127,30 @@ module internal KinesisUtils =
 
     /// Returns the shards that are part of the stream
     let getShards (kinesis : IAmazonKinesis) streamName =
-        async {
-            let req = new DescribeStreamRequest(StreamName = streamName)
-            let! res = Async.WithRetry(kinesis.DescribeStreamAsync(req) |> Async.AwaitTask, 2)
-               
-            match res with
-            | Choice1Of2 res ->
-                let shardIds = res.StreamDescription.Shards |> Seq.map (fun shard -> shard.ShardId) |> Seq.toArray
-                logger.DebugFormat("Stream [{0}] has [{1}] shards: [{2}]", streamName, shardIds.Length, csv shardIds)
-                return Success(res.StreamDescription.StreamStatus.Value, res.StreamDescription.Shards, shardIds)
-            | Choice2Of2 (Flatten exn) -> 
-                logger.Error(sprintf "Failed to get shards for stream [%s]" streamName, exn)
-                return Failure exn
-        }
+        let rec describeStream acc startShardId = 
+            async {
+                let req = new DescribeStreamRequest(StreamName = streamName, Limit = 1)
+                match startShardId with
+                | Some shardId -> req.ExclusiveStartShardId <- shardId
+                | _ -> ()
+                    
+                let! res = Async.WithRetry(kinesis.DescribeStreamAsync(req) |> Async.AwaitTask, 2)
+                match res with 
+                | Choice1Of2 res when not res.StreamDescription.HasMoreShards -> 
+                    let shards   = (res.StreamDescription.Shards :: acc) |> Seq.collect id |> Seq.toArray
+                    let shardIds = shards |> Seq.map (fun shard -> shard.ShardId) |> Seq.toArray
+
+                    logger.DebugFormat("Stream [{0}] has [{1}] shards: [{2}]", streamName, shardIds.Length, csv shardIds)
+                    return Success (res.StreamDescription.StreamStatus.Value, shards, shardIds)
+                | Choice1Of2 res ->
+                    let lastShardId = res.StreamDescription.Shards |> Seq.last
+                    return! describeStream (res.StreamDescription.Shards :: acc) (Some lastShardId.ShardId)
+                | Choice2Of2 (Flatten exn) -> 
+                    logger.Error(sprintf "Failed to get shards for stream [%s]" streamName, exn)
+                    return Failure exn
+            }
+            
+        async { return! describeStream [] None }
 
     /// Splits the specified shard in the middle of its hash key range
     let splitShard (kinesis : IAmazonKinesis) streamName (shard : Shard) =

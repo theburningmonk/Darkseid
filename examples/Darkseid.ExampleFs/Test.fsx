@@ -6,6 +6,7 @@ open System
 open System.IO
 open System.Text
 open System.Threading
+open System.Threading.Tasks
 open Amazon
 open Amazon.DynamoDBv2.DocumentModel
 open Amazon.Kinesis.Model
@@ -14,8 +15,8 @@ open log4net.Config
 open Darkseid
 open Darkseid.Model
 
-let awsKey      = "AKIAIF4IYIIJKW6DURPQ"
-let awsSecret   = "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"
+let awsKey      = "AKIAJ27RLPDDIA5Z2NLQ"
+let awsSecret   = "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"
 let region      = RegionEndpoint.USEast1
 let streamName  = "YC-test"
 
@@ -33,4 +34,4 @@ let send () =
     let record = { Data = payload; PartitionKey = Guid.NewGuid().ToString() }
     producer.Send(record)
 
-[| 1..1000 |] |> Array.iter (fun _ -> send())
+[| 1..1000 |] |> Array.iter (fun _ -> Task.Run(fun () -> send()) |> ignore)
