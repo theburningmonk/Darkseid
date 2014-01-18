@@ -104,7 +104,7 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
             |> Seq.length
 
         async {
-            let! res = CloudWatchUtils.getAvgStreamMetric cloudWatch streamDim CloudWatchUtils.throttledMetricName config
+            let! res = CloudWatchUtils.getStreamMetric cloudWatch streamDim CloudWatchUtils.throttledMetricName config
             match res with
             | Success dataPoints -> 
                 if dataPoints.Count >= int config.ThrottleThreshold.ConsecutiveMinutes &&
@@ -114,7 +114,7 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
                     do! splitBusiestShard
             | Failure exn -> logger.Error(sprintf "Couldn't get throttle metrics for the stream [%s]" streamName, exn)
         }
-
+        
     let startTimer onElapsed (interval : TimeSpan)  = 
         let timer = new Timer(interval.TotalMilliseconds)
         do timer.Elapsed.Add onElapsed
@@ -123,7 +123,6 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
 
     let pushTimer  = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(pushMetrics, cts.Token))
     let splitTimer = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(checkThrottles, cts.Token))
-    let mergeTimer = TimeSpan.FromMinutes(5.0) |> startTimer (fun _ -> ())
 
     member this.TrackThrottledSend (partitionKey : string) = 
         agent.Post <| IncrMetric(DateTime.UtcNow, streamDims, StandardUnit.Count, CloudWatchUtils.throttledMetricName, 1)

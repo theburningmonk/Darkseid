@@ -176,6 +176,17 @@ module internal KinesisUtils =
             | Choice2Of2 exn -> logger.Error(sprintf "Failed to split shard [%s] in stream [%s]" shard.ShardId streamName, exn)
         }
 
+    /// Merges the specified shards into one
+    let mergeShards (kinesis : IAmazonKinesis) streamName (shardId : string) (adjacentShardId : string) =
+        async {
+            let req = new MergeShardsRequest(StreamName = streamName, ShardToMerge = shardId, AdjacentShardToMerge = adjacentShardId)
+
+            let! res = kinesis.MergeShardsAsync(req) |> Async.AwaitTask |> Async.Catch
+            match res with
+            | Choice1Of2 _   -> logger.DebugFormat("Successfuly merged shard [{0}] with adjacent shard [{1}] in stream [{2}]", shardId, adjacentShardId, streamName)
+            | Choice2Of2 exn -> logger.Error(sprintf "Failed to merged shard [%s] with adjacent shard [%s] in stream [%s]" shardId adjacentShardId streamName, exn)
+        }
+
 module internal CloudWatchUtils =
     let private logger = LogManager.GetLogger("CloudWatchUtils")
     
@@ -238,7 +249,7 @@ module internal CloudWatchUtils =
     /// Get the averages of CloudWatch metrics for a batch of shards
     let getAvgShardMetrics (cloudWatch : IAmazonCloudWatch) (streamDim : Dimension) (shardIds : string[]) metricName =
         let endTime    = DateTime.UtcNow
-        let startTime  = endTime.AddMinutes(-5.0)
+        let startTime  = endTime.AddMinutes(-10.0)
         let streamName = streamDim.Value
 
         async {
@@ -259,7 +270,7 @@ module internal CloudWatchUtils =
         }
 
     /// Get the average of a CloudWatch metric for a stream
-    let getAvgStreamMetric (cloudWatch : IAmazonCloudWatch) (streamDim : Dimension) metricName (config : DarkseidConfig) =        
+    let getStreamMetric (cloudWatch : IAmazonCloudWatch) (streamDim : Dimension) metricName (config : DarkseidConfig) =        
         let streamName = streamDim.Value
         let { ConsecutiveMinutes = maxConsecutive } = config.ThrottleThreshold
 
