@@ -28,6 +28,15 @@ module internal Utils =
             | mode -> raise <| InvalidHighWaterMarksMode mode
         | _ -> ()
 
+        if config.ThrottleThreshold.ConsecutiveMinutes = 0u then
+            raise <| Exception("ThrottleThreshold.ConsecutiveMinutes cannot be 0")
+
+        if config.ThrottleThreshold.ConsecutiveMinutes > 30u then
+            raise <| Exception("Please keep ThrottleThreshold.ConsecutiveMinutes to under 30 minutes")
+
+        if config.ThrottleThreshold.MaxThrottlePerMinute = 0u then
+            raise <| Exception("ThrottleThreshold.MaxThrottlePerMinute cannot be 0")
+
     // since the async methods from the AWSSDK excepts with AggregateException which is not all that useful, hence
     // this active pattern which unwraps any AggregateException
     let rec (|Flatten|) (exn : Exception) =
@@ -250,10 +259,12 @@ module internal CloudWatchUtils =
         }
 
     /// Get the average of a CloudWatch metric for a stream
-    let getAvgStreamMetric (cloudWatch : IAmazonCloudWatch) (streamDim : Dimension) metricName =
-        let endTime    = DateTime.UtcNow
-        let startTime  = endTime.AddMinutes(-5.0)
+    let getAvgStreamMetric (cloudWatch : IAmazonCloudWatch) (streamDim : Dimension) metricName (config : DarkseidConfig) =        
         let streamName = streamDim.Value
+        let { ConsecutiveMinutes = maxConsecutive } = config.ThrottleThreshold
+
+        let endTime    = DateTime.UtcNow
+        let startTime  = endTime.AddMinutes(-5.0 - float maxConsecutive) // get a few more minutes of data to make sure we satisfy the requirement
 
         async {
             logger.DebugFormat("Getting metric [{0}] for stream [{1}]", metricName, streamName)
@@ -268,8 +279,7 @@ module internal CloudWatchUtils =
             let! res = Async.WithRetry(cloudWatch.GetMetricStatisticsAsync(req) |> Async.AwaitTask, 2)
             match res with
             | Choice1Of2 res -> 
-                let avg = res.Datapoints |> Seq.map (fun dp -> dp.Sum) |> Seq.average
-                logger.DebugFormat("Received [{0}] datapoints for stream [{1}], average is [{2}]", res.Datapoints.Count, streamName, avg)
-                return Success avg
+                logger.DebugFormat("Received [{0}] datapoints for stream [{1}]", res.Datapoints.Count, streamName)
+                return Success res.Datapoints
             | Choice2Of2 (Flatten exn) -> return Failure exn
         }

@@ -97,11 +97,21 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
         }
 
     let checkThrottles =
+        let getConsecutiveBreaches (dataPoints : List<Datapoint>) =
+            dataPoints 
+            |> Seq.sortBy (fun dp -> -dp.Timestamp.Ticks)
+            |> Seq.takeWhile (fun dp -> dp.Sum >= float config.ThrottleThreshold.MaxThrottlePerMinute)
+            |> Seq.length
+
         async {
-            let! res = CloudWatchUtils.getAvgStreamMetric cloudWatch streamDim CloudWatchUtils.throttledMetricName
+            let! res = CloudWatchUtils.getAvgStreamMetric cloudWatch streamDim CloudWatchUtils.throttledMetricName config
             match res with
-            | Success avgThrottle -> 
-                if avgThrottle > 100.0 then do! splitBusiestShard
+            | Success dataPoints -> 
+                if dataPoints.Count >= int config.ThrottleThreshold.ConsecutiveMinutes &&
+                   getConsecutiveBreaches dataPoints >= int config.ThrottleThreshold.ConsecutiveMinutes 
+                then 
+                    logger.DebugFormat("Throttle threshold [{0}] for stream [{1}] is breached, splitting busiest shard.", config.ThrottleThreshold, streamName)
+                    do! splitBusiestShard
             | Failure exn -> logger.Error(sprintf "Couldn't get throttle metrics for the stream [%s]" streamName, exn)
         }
 

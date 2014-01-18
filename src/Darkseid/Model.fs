@@ -21,6 +21,20 @@ type ProcessingMode =
     | Background    of BackgroundProcessingConfig
     | Blocking
 
+type ThrottleThreshold =
+    {
+        MaxThrottlePerMinute    : uint32   // max number of throttled puts allowed per minute
+        ConsecutiveMinutes      : uint32   // the number of consecutive minutes where the threshold has been breached
+    }
+    static member Default = 
+        {
+            MaxThrottlePerMinute    = 100u
+            ConsecutiveMinutes      = 3u
+        }
+
+    override this.ToString() =
+        sprintf ">= %d throttled calls per minute for %d consecutive minutes" this.MaxThrottlePerMinute this.ConsecutiveMinutes
+
 type DarkseidConfig () =
     /// How to process the send requests, the available modes are
     ///  - Background : records are saved into Kinesis by a number of background workers, the send request
@@ -35,6 +49,9 @@ type DarkseidConfig () =
 
     /// The max number of attempts allowed for putting a record into the stream. Default is 3.
     member val MaxPutRecordAttempts = 3 with get, set
+
+    /// Threshold for the throttled calls which will trigger splitting shards. Default is 100 throttles for 3 consecutive minutes.
+    member val ThrottleThreshold    = ThrottleThreshold.Default with get, set
 
 type Record =
     {
