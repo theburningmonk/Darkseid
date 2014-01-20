@@ -124,6 +124,16 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
     let pushTimer  = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(pushMetrics, cts.Token))
     let splitTimer = TimeSpan.FromMinutes(1.0) |> startTimer (fun _ -> Async.Start(checkThrottles, cts.Token))
 
+    let disposeInvoked = ref 0
+    let cleanup (disposing : bool) =
+        if System.Threading.Interlocked.CompareExchange(disposeInvoked, 1, 0) = 0 then
+            logger.Debug("Disposing...")
+            
+            pushTimer.Dispose()
+            splitTimer.Dispose()
+
+            logger.Debug("Disposed.")
+
     member this.TrackThrottledSend (partitionKey : string) = 
         agent.Post <| IncrMetric(DateTime.UtcNow, streamDims, StandardUnit.Count, CloudWatchUtils.throttledMetricName, 1)
 
@@ -131,6 +141,11 @@ type internal VirmanVundabar (kinesis    : IAmazonKinesis,
         let shardDims = getShardDims shardId
         agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Count, CloudWatchUtils.sendMetricName, 1)
         agent.Post <| IncrMetric(DateTime.UtcNow, shardDims, StandardUnit.Bytes, CloudWatchUtils.sizeMetricName, payloadSize)
+    
+    interface IDisposable with
+        member this.Dispose () = 
+            GC.SuppressFinalize(this)
+            cleanup(true)
 
 type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
                                config     : DarkseidConfig,
@@ -229,7 +244,8 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
         }
 
     /// agent for handling the blocking processing mode
-    let getBlockingAgent (inbox : Agent<GodfreyMessage>) (getTrooper  : Record -> Agent<AeroTrooperMessage>) =
+    let getBlockingAgent (inbox         : Agent<GodfreyMessage>) 
+                         (getTrooper    : Record -> Agent<AeroTrooperMessage>) =
         async {
             while true do
                 let! msg = inbox.Receive()
@@ -251,8 +267,33 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
 
     let agent = Agent<GodfreyMessage>.Start(body, cts.Token)
     do agent.Error.Add(fun exn -> logger.Warn("Encountered an unhandled error. Ignoring.", exn))
+    
+    let disposeInvoked = ref 0
+    let cleanup (disposing : bool) =
+        if System.Threading.Interlocked.CompareExchange(disposeInvoked, 1, 0) = 0 then
+            logger.Debug("Disposing...waiting for all messages in circulation to be dealt with.")
 
-    member this.Send (record) = agent.PostAndAsyncReply (fun reply -> Send(record, reply))
+            // backlog = sent to troopers to save
+            // current queue = posted to top-level agent but not yet distributed to troopers
+            while (agent.CurrentQueueLength + backlogSize) > 0 do Thread.Sleep(10)
+
+            logger.Debug("Disposed...")
+
+    member this.Send (record) = 
+        if !disposeInvoked > 0 
+        then raise ApplicationIsDisposing
+        else agent.PostAndAsyncReply (fun reply -> Send(record, reply))
+
+    interface IDisposable with
+        member this.Dispose () = 
+            GC.SuppressFinalize(this)
+            cleanup(true)
+
+    // provide a finalizer so that in the case the consumer forgets to dispose of the app the
+    // finalizer will clean up
+    override this.Finalize () =
+        logger.Warn("Finalizer is invoked. Please ensure that the object is disposed in a deterministic manner instead.")
+        cleanup(false)
 
 type Producer private (kinesis      : IAmazonKinesis,
                        cloudWatch   : IAmazonCloudWatch,
@@ -270,6 +311,13 @@ type Producer private (kinesis      : IAmazonKinesis,
  
     let virman  = new VirmanVundabar(kinesis, cloudWatch, config, appName, streamName, cts)
     let godfrey = new GloriousGodfrey(kinesis, config, appName, streamName, cts, virman)
+
+    let disposeInvoked = ref 0
+    let cleanup (disposing : bool) =
+        if System.Threading.Interlocked.CompareExchange(disposeInvoked, 1, 0) = 0 then
+            logger.Debug("Disposing...")
+            (godfrey :> IDisposable).Dispose()            
+            logger.Debug("Disposed.")
 
     member this.Send (record : Record) = 
         async {
@@ -305,3 +353,14 @@ type Producer private (kinesis      : IAmazonKinesis,
         new Producer(kinesis, cloudWatch, config, appName, streamName)
 
     [<CLIEvent>] member this.OnError = errorEvent.Publish
+    
+    interface IDisposable with
+        member this.Dispose () = 
+            GC.SuppressFinalize(this)
+            cleanup(true)
+
+    // provide a finalizer so that in the case the consumer forgets to dispose of the app the
+    // finalizer will clean up
+    override this.Finalize () =
+        logger.Warn("Finalizer is invoked. Please ensure that the object is disposed in a deterministic manner instead.")
+        cleanup(false)

@@ -62,6 +62,7 @@ type Record =
 [<AutoOpen>]
 module Exceptions =
     exception InvalidHighWaterMarksMode of HighWaterMarksMode
+    exception ApplicationIsDisposing
     
 [<AutoOpen>]
 module internal InternalModel =    
@@ -70,11 +71,11 @@ module internal InternalModel =
         | Failure   of 'Failure
 
     type GodfreyMessage =
-        | Send of Record * AsyncReplyChannel<Result<unit, Exception>>
+        | Send          of Record * AsyncReplyChannel<Result<unit, Exception>>
 
     type AeroTrooperMessage =
-        | Put         of Record
-        | BlockingPut of Record * AsyncReplyChannel<Result<unit, Exception>>
+        | Put           of Record
+        | BlockingPut   of Record * AsyncReplyChannel<Result<unit, Exception>>
 
     type Metric = 
         {
