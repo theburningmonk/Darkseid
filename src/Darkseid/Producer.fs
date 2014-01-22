@@ -243,8 +243,11 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
                     | true ->
                         match bgConfig.HighWaterMarksMode with
                         | HighWaterMarksMode.DropData -> 
+                            logger.WarnFormat("HighWaterMark [{0}] reached, dropping data...", bgConfig.HighWaterMarks)
                             reply.Reply(Success ())
                         | HighWaterMarksMode.Block    -> 
+                            logger.WarnFormat("HighWaterMark [{0}] reached, blocking send request...", bgConfig.HighWaterMarks)
+
                             // block until we're below the high water mark
                             while backlogSize >= bgConfig.HighWaterMarks do
                                 do! Async.Sleep(10)
