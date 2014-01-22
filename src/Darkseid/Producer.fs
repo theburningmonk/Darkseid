@@ -6,6 +6,7 @@ open System.Globalization
 open System.IO
 open System.Security.Cryptography
 open System.Threading
+open System.Threading.Tasks
 open System.Timers
 
 open Amazon
@@ -18,6 +19,19 @@ open log4net
 open Checked
 open Darkseid.Model
 open Darkseid.Utils
+
+/// Represents a producer of data for Amazon Kinesis
+type IProducer =
+    inherit IDisposable
+
+    /// Fired when the application has been initialized
+    [<CLIEvent>]
+    abstract member OnError : IEvent<OnErrorDelegate, OnErrorEventArgs>
+
+    /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
+    ///  1) Blocking mode   : when data is sent to Kinesis
+    ///  2) Background mode : when data is accepted into the backlog
+    abstract member Send    : Record -> Task
 
 type internal VirmanVundabar (kinesis    : IAmazonKinesis,
                               cloudWatch : IAmazonCloudWatch,
@@ -279,6 +293,8 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
 
             logger.Debug("Disposed...")
 
+    member this.OnError = errorEvent.Publish
+
     member this.Send (record) = 
         if !disposeInvoked > 0 
         then raise ApplicationIsDisposing
@@ -299,18 +315,19 @@ type Producer private (kinesis      : IAmazonKinesis,
                        cloudWatch   : IAmazonCloudWatch,
                        config       : DarkseidConfig,
                        appName      : string,
-                       streamName   : string) =
+                       streamName   : string) as this =
     let loggerName = sprintf "Darkseid[AppName:%s, Stream:%s]" appName streamName
     let logger     = LogManager.GetLogger loggerName
 
     do validateConfig config
 
-    let errorEvent = new Event<Record * Exception>()
+    let errorEvent = new Event<OnErrorDelegate, OnErrorEventArgs>()
 
     let cts = new CancellationTokenSource()
  
     let virman  = new VirmanVundabar(kinesis, cloudWatch, config, appName, streamName, cts)
     let godfrey = new GloriousGodfrey(kinesis, config, appName, streamName, cts, virman)
+    do godfrey.OnError.Add(fun (record, exn) -> errorEvent.Trigger(this, new OnErrorEventArgs(record, exn)))
 
     let disposeInvoked = ref 0
     let cleanup (disposing : bool) =
@@ -318,15 +335,6 @@ type Producer private (kinesis      : IAmazonKinesis,
             logger.Debug("Disposing...")
             (godfrey :> IDisposable).Dispose()            
             logger.Debug("Disposed.")
-
-    member this.Send (record : Record) = 
-        async {
-            let! res = godfrey.Send(record)
-            match res with
-            | Success _   -> ()
-            | Failure exn -> raise exn
-        }
-        |> Async.StartAsPlainTask
     
     static member CreateNew(awsKey    : string, 
                             awsSecret : string, 
@@ -335,7 +343,7 @@ type Producer private (kinesis      : IAmazonKinesis,
         let config     = new DarkseidConfig()
         let kinesis    = AWSClientFactory.CreateAmazonKinesisClient(awsKey, awsSecret, region)
         let cloudWatch = AWSClientFactory.CreateAmazonCloudWatchClient(awsKey, awsSecret, region)
-        new Producer(kinesis, cloudWatch, config, appName, streamName)
+        new Producer(kinesis, cloudWatch, config, appName, streamName) :> IProducer
 
     static member CreateNew(awsKey    : string, 
                             awsSecret : string, 
@@ -343,17 +351,27 @@ type Producer private (kinesis      : IAmazonKinesis,
                             appName, streamName, config) =
         let kinesis    = AWSClientFactory.CreateAmazonKinesisClient(awsKey, awsSecret, region)
         let cloudWatch = AWSClientFactory.CreateAmazonCloudWatchClient(awsKey, awsSecret, region)
-        new Producer(kinesis, cloudWatch, config, appName, streamName)
+        new Producer(kinesis, cloudWatch, config, appName, streamName) :> IProducer
 
     static member CreateNew(kinesis, cloudWatch, appName, streamName) =
         let config = new DarkseidConfig()
-        new Producer(kinesis, cloudWatch, config, appName, streamName)
+        new Producer(kinesis, cloudWatch, config, appName, streamName) :> IProducer
 
     static member CreateNew(kinesis, cloudWatch, appName, streamName, config) =
-        new Producer(kinesis, cloudWatch, config, appName, streamName)
+        new Producer(kinesis, cloudWatch, config, appName, streamName) :> IProducer
+        
+    interface IProducer with        
+        [<CLIEvent>] member this.OnError = errorEvent.Publish
 
-    [<CLIEvent>] member this.OnError = errorEvent.Publish
-    
+        member this.Send (record : Record) = 
+            async {
+                let! res = godfrey.Send(record)
+                match res with
+                | Success _   -> ()
+                | Failure exn -> raise exn
+            }
+            |> Async.StartAsPlainTask
+
     interface IDisposable with
         member this.Dispose () = 
             GC.SuppressFinalize(this)

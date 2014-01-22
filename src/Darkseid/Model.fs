@@ -60,6 +60,16 @@ type Record =
     }
 
 [<AutoOpen>]
+module CustomEvents =
+    type OnErrorEventArgs (record, exn) =
+        inherit EventArgs()
+
+        member this.Record    = record
+        member this.Exception = exn
+
+    type OnErrorDelegate = delegate of obj * OnErrorEventArgs -> unit
+
+[<AutoOpen>]
 module Exceptions =
     exception InvalidHighWaterMarksMode of HighWaterMarksMode
     exception ApplicationIsDisposing
