@@ -23,7 +23,9 @@ let main argv =
     let kinesis    = Amazon.AWSClientFactory.CreateAmazonKinesisClient()
     let cloudWatch = Amazon.AWSClientFactory.CreateAmazonCloudWatchClient()
     
-    let config = new DarkseidConfig(LevelOfConcurrency = 100u)
+    let bgConfig = BackgroundProcessingConfig(HighWaterMarks = 100000, HighWaterMarksMode = HighWaterMarksMode.Block)
+    let mode   = Background bgConfig
+    let config = new DarkseidConfig(Mode = mode, LevelOfConcurrency = 100u)
     let producer = Producer.CreateNew(kinesis, cloudWatch, appName, streamName, config)
 
     let payload = [| 1..3 |] |> Array.map (fun _ -> "42") |> Array.reduce (+) |> System.Text.Encoding.UTF8.GetBytes
@@ -39,8 +41,14 @@ let main argv =
                 do! Async.Sleep(1)
         }
 
-    do Async.Start(loop)
+    printfn "Starting 10 send loops..."
+
+    for i = 1 to 10 do
+        do Async.Start(loop)
+
+    printfn "Started."
 
     printf "Press any key to stop..."
-    Console.ReadKey();
+    Console.ReadKey() |> ignore
+
     0 // return an integer exit code
