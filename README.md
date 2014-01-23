@@ -145,6 +145,7 @@ for i = 1 to 10 do
 
 printfn "Started."
 ```
+You can find both C# and F# examples under the [examples](https://github.com/theburningmonk/Darkseid/tree/develop/examples) folder, you just need to update the AWS credentials and set the stream name to the one you have created in your AWS environment to run the examples.
 
 
 
