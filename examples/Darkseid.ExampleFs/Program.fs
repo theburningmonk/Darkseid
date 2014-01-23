@@ -15,18 +15,19 @@ open Darkseid.Model
 
 [<EntryPoint>]
 let main argv =  
+    let awsKey      = "AKIAJ27RLPDDIA5Z2NLQ"
+    let awsSecret   = "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"
+    let region      = RegionEndpoint.USEast1
     let appName     = "YC-TEST"
     let streamName  = "YC-test"
    
     BasicConfigurator.Configure()
 
-    let kinesis    = Amazon.AWSClientFactory.CreateAmazonKinesisClient()
-    let cloudWatch = Amazon.AWSClientFactory.CreateAmazonCloudWatchClient()
-    
-    let bgConfig = BackgroundProcessingConfig(HighWaterMarks = 100000, HighWaterMarksMode = HighWaterMarksMode.Block)
-    let mode   = Background bgConfig
-    let config = new DarkseidConfig(Mode = mode, LevelOfConcurrency = 100u)
-    let producer = Producer.CreateNew(kinesis, cloudWatch, appName, streamName, config)
+    let bgConfig  = BackgroundProcessingConfig(HighWaterMarks = 100000, HighWaterMarksMode = HighWaterMarksMode.Block)
+    let mode      = Background bgConfig
+    let config    = new DarkseidConfig(Mode = mode, LevelOfConcurrency = 100u)
+
+    let producer  = Producer.CreateNew(awsKey, awsSecret, region, appName, streamName, config)
 
     let payload = [| 1..3 |] |> Array.map (fun _ -> "42") |> Array.reduce (+) |> System.Text.Encoding.UTF8.GetBytes
 

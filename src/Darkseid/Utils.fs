@@ -1,4 +1,4 @@
-﻿module Darkseid.Utils
+﻿namespace Darkseid.Utils
 
 open System
 open System.Collections.Generic

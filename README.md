@@ -102,6 +102,50 @@ When operating in the `Blocking` mode, any exceptions will be reported via the r
 
 However, when operating in the `Background` mode, since the exception will be caught by the background worker, so to find out about the exception and the `Record` in question (so that you can resend, or fall-back to Amazon SQS perhaps?) you'll need to listen to the `IProducer.OnError` event.
 
+#### Disposing
+
+When operating in the `Background` mode, in order to avoid losing any data that are still sitting in the backlog, it's important for you to ensure that you dispose of the `IProducer` instance when your application is shutting down.
+
+
+
+#### F# Example
+
+```fsharp
+
+let awsKey      = "AKIAI5Y767DTOFBUSYAA"
+let awsSecret   = "zollLGekGcjIdFvCzvtbyf9OfCI1R3nvjtkSQgSM"
+let region      = RegionEndpoint.USEast1
+let appName		= "TestApp"
+let streamName	= "TestStream"
+
+// provide a custom configuration for the producer
+let bgConfig  = BackgroundProcessingConfig(HighWaterMarks = 100000, HighWaterMarksMode = HighWaterMarksMode.Block)
+let mode      = Background bgConfig
+let config    = new DarkseidConfig(Mode = mode, LevelOfConcurrency = 100u)
+
+let producer  = Producer.CreateNew(awsKey, awsSecret, region, appName, streamName, config)
+
+let payload = [| 1..3 |] |> Array.map (fun _ -> "42") |> Array.reduce (+) |> System.Text.Encoding.UTF8.GetBytes
+
+let send () =
+    let record = { Data = payload; PartitionKey = Guid.NewGuid().ToString() }
+    producer.Send(record)
+
+let loop = 
+    async {
+        while true do
+            send().Wait()
+            do! Async.Sleep(1)
+    }
+
+printfn "Starting 10 send loops..."
+
+for i = 1 to 10 do
+    do Async.Start(loop)
+
+printfn "Started."
+```
+
 
 
 

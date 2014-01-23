@@ -1,4 +1,4 @@
-﻿module Darkseid.Model
+﻿namespace Darkseid.Model
 
 open System
 
