@@ -29,7 +29,7 @@ let project = "Darkseid"
 
 // Short summary of the project
 // (used as description in AssemblyInfo and as a short summary for NuGet package)
-let summary = "Actor-based library to help you push data data into Amazon Kinesis stream and manage sharding level based on load"
+let summary = "Actor-based library to help you build a real-time data producing application on top of Amazon Kinesis"
 
 // Longer description of the project
 // (used as a description for NuGet package; line breaks are automatically cleaned up)
@@ -38,7 +38,7 @@ let description = """
 // List of author names (for NuGet package)
 let authors = [ "Yan Cui" ]
 // Tags for your project (for NuGet package)
-let tags = "F# fsharp aws amazon kinesis bigdata"
+let tags = "F# fsharp aws amazon kinesis bigdata analytics"
 
 // File system information 
 // (<solutionFile>.sln is built during the building process)
