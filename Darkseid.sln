@@ -1,0 +1,55 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Darkseid", "src\Darkseid\Darkseid.fsproj", "{179936E1-BF5C-4737-B27C-E24EA1AA52C0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{7BC42E26-1A8E-4C63-9A04-E700E8772F6C}"
+	ProjectSection(SolutionItems) = preProject
+		.nuget\NuGet.Config = .nuget\NuGet.Config
+		.nuget\NuGet.exe = .nuget\NuGet.exe
+		.nuget\NuGet.targets = .nuget\NuGet.targets
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project", "project", "{B861FA52-E932-4234-9A6A-D71AE8C8770E}"
+	ProjectSection(SolutionItems) = preProject
+		build.fsx = build.fsx
+		nuget\Darkseid.nuspec = nuget\Darkseid.nuspec
+		README.md = README.md
+		RELEASE_NOTES.md = RELEASE_NOTES.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{BCD04360-E29D-4169-8EFD-D4F96DA29098}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "examples", "examples", "{FCCDD8ED-C987-4F36-A2F4-C326E9978AD1}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Darkseid.ExampleFs", "examples\Darkseid.ExampleFs\Darkseid.ExampleFs.fsproj", "{3BC9B81C-F883-4B31-9FBF-3C486643F3BC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Darkseid.ExampleCs", "examples\Darkseid.ExampleCs\Darkseid.ExampleCs.csproj", "{82DC439A-446F-49FD-9AEA-ED9B7AE70F18}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{179936E1-BF5C-4737-B27C-E24EA1AA52C0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{179936E1-BF5C-4737-B27C-E24EA1AA52C0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{179936E1-BF5C-4737-B27C-E24EA1AA52C0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{179936E1-BF5C-4737-B27C-E24EA1AA52C0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BC9B81C-F883-4B31-9FBF-3C486643F3BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BC9B81C-F883-4B31-9FBF-3C486643F3BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BC9B81C-F883-4B31-9FBF-3C486643F3BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BC9B81C-F883-4B31-9FBF-3C486643F3BC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82DC439A-446F-49FD-9AEA-ED9B7AE70F18}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82DC439A-446F-49FD-9AEA-ED9B7AE70F18}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82DC439A-446F-49FD-9AEA-ED9B7AE70F18}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82DC439A-446F-49FD-9AEA-ED9B7AE70F18}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{3BC9B81C-F883-4B31-9FBF-3C486643F3BC} = {FCCDD8ED-C987-4F36-A2F4-C326E9978AD1}
+		{82DC439A-446F-49FD-9AEA-ED9B7AE70F18} = {FCCDD8ED-C987-4F36-A2F4-C326E9978AD1}
+	EndGlobalSection
+EndGlobal
