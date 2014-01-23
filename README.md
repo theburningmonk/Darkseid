@@ -193,3 +193,5 @@ Many aspects of the library's operations can be configured, see the [Configuring
 #### Monitoring via CloudWatch
 
 The library provides shard specific CloudWatch metrics for successful and throttled requests to Kinesis as well as the total size of data (in bytes) sent, down to the minute interval, which fills a gap in the current set of CloudWatch metrics that the service itself is reporting.
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/theburningmonk/darkseid/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
