@@ -22,7 +22,9 @@ Please familiarize yourself with how **Amazon Kinesis** works by looking through
 
 #### Getting Started
 
-Download and install the library from Nuget.
+Download and install the library from Nuget [here](https://www.nuget.org/packages/darkseid/).
+
+<a href="https://www.nuget.org/packages/darkseid/"><img src="https://raw.github.com/theburningmonk/Darkseid/develop/nuget/banner.png"/></a>
 
 
 

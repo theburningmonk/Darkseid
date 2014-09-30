@@ -138,7 +138,7 @@ module internal KinesisUtils =
     let getShards (kinesis : IAmazonKinesis) streamName =
         let rec describeStream acc startShardId = 
             async {
-                let req = new DescribeStreamRequest(StreamName = streamName, Limit = 1)
+                let req = new DescribeStreamRequest(StreamName = streamName)
                 match startShardId with
                 | Some shardId -> req.ExclusiveStartShardId <- shardId
                 | _ -> ()
