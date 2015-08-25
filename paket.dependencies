@@ -1,6 +1,8 @@
 source https://www.nuget.org/api/v2/
-source http://teamcity.thesecondrow.com:81/nuget/Default
 
+nuget FAKE
+nuget FSharp.Core ~> 3.1
+nuget NUnit.Runners
 nuget Nuget.CommandLine
 nuget AWSSDK >= 2.3.1.0
 nuget log4net

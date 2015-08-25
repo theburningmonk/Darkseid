@@ -1,0 +1,25 @@
+﻿type project
+id Darkseid
+owners
+	Yan Cui
+authors 
+	Yan Cui
+
+projectUrl 
+	https://github.com/theburningmonk/Darkseid/
+iconUrl 
+	https://raw.github.com/theburningmonk/Darkseid/master/nuget/logo.png
+licenseUrl 
+	https://github.com/theburningmonk/Darkseid/blob/master/LICENSE.txt
+
+summary
+	Actor-based library to help you build a real-time data producing application on top of Amazon Kinesis
+
+DESCRIPTION
+	Actor-based library to help you push data data into Amazon Kinesis stream and manage the sharding level of your stream:
+		- auto-split shards based on rate of throttled calls
+		- send data in blocking or background mode
+		- use high-water marks to manage the size of the backlog when running in background mode
+		- fully asynchronous
+		- highly configurable
+		- reports shard specific metrics to CloudWatch
