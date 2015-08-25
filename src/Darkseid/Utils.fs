@@ -55,7 +55,7 @@ module internal Utils =
             | false, _  ->
                 // evaluate and add result to cache
                 let result = f input
-                cache.Add(input, result)
+                cache.[input] <- result
                 result
 
         // return the memoized version of f
