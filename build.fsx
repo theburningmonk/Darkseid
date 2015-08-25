@@ -9,7 +9,7 @@ open Fake.AssemblyInfoFile
 open Fake.ReleaseNotesHelper
 open System
 
-let buildDir = "build/"
+let buildDir = "bin/"
 let testDir  = "test/"
 let tempDir  = "temp/"
 
@@ -33,22 +33,21 @@ let summary = "Actor-based library to help you build a real-time data producing 
 
 // Longer description of the project
 // (used as a description for NuGet package; line breaks are automatically cleaned up)
-let description = """
-"""
+let projectFile  = "src/Darkseid/Darkseid.fsproj"
+
 // List of author names (for NuGet package)
 let authors = [ "Yan Cui" ]
 // Tags for your project (for NuGet package)
 let tags = "F# fsharp aws amazon kinesis bigdata analytics"
 
 // File system information 
-// (<solutionFile>.sln is built during the building process)
-let projectFile  = "Darkseid.fsproj"
 // Pattern specifying assemblies to be tested using NUnit
-let testAssemblies = ["tests/*/bin/*/Darkseid*Tests*.dll"]
+let testAssemblies = "tests/**/bin/Release/*Tests*.dll"
 
 // Git configuration (used for publishing documentation in gh-pages branch)
 // The profile where the project is posted 
 let gitHome = "https://github.com/theburningmonk"
+
 // The name of the project on GitHub
 let gitName = "Darkseid"
 
@@ -57,43 +56,59 @@ let gitName = "Darkseid"
 // --------------------------------------------------------------------------------------
 
 // Read additional information from the release notes document
-Environment.CurrentDirectory <- __SOURCE_DIRECTORY__
-let release = parseReleaseNotes (IO.File.ReadAllLines "RELEASE_NOTES.md")
+let release = LoadReleaseNotes "RELEASE_NOTES.md"
+
+// Helper active pattern for project types
+let (|Fsproj|Csproj|Vbproj|) (projFileName:string) = 
+    match projFileName with
+    | f when f.EndsWith("fsproj") -> Fsproj
+    | f when f.EndsWith("csproj") -> Csproj
+    | f when f.EndsWith("vbproj") -> Vbproj
+    | _                           -> failwith (sprintf "Project file %s not supported. Unknown project type." projFileName)
 
 // Generate assembly info files with the right version & up-to-date information
 Target "AssemblyInfo" (fun _ ->
-  let fileName = "src/" + project + "/AssemblyInfo.fs"
-  CreateFSharpAssemblyInfo fileName
-      [ Attribute.Title         project
-        Attribute.Product       project
-        Attribute.Description   summary
-        Attribute.Version       release.AssemblyVersion
-        Attribute.FileVersion   release.AssemblyVersion ] 
+    let getAssemblyInfoAttributes projectName =
+        [ Attribute.Title (projectName)
+          Attribute.Product project
+          Attribute.Description summary
+          Attribute.Version release.AssemblyVersion
+          Attribute.FileVersion release.AssemblyVersion ]
+
+    let getProjectDetails projectPath =
+        let projectName = System.IO.Path.GetFileNameWithoutExtension(projectPath)
+        ( projectPath, 
+          projectName,
+          System.IO.Path.GetDirectoryName(projectPath),
+          (getAssemblyInfoAttributes projectName)
+        )
+
+    !! "src/**/*.??proj"
+    |> Seq.map getProjectDetails
+    |> Seq.iter (fun (projFileName, projectName, folderName, attributes) ->
+        match projFileName with
+        | Fsproj -> CreateFSharpAssemblyInfo (folderName @@ "AssemblyInfo.fs") attributes
+        | Csproj -> CreateCSharpAssemblyInfo ((folderName @@ "Properties") @@ "AssemblyInfo.cs") attributes
+        | Vbproj -> CreateVisualBasicAssemblyInfo ((folderName @@ "My Project") @@ "AssemblyInfo.vb") attributes
+        )
 )
 
 // --------------------------------------------------------------------------------------
-// Clean build results & restore NuGet packages
-
-Target "RestorePackages" RestorePackages
+// Clean build results
 
 Target "Clean" (fun _ ->
-    CleanDirs [ buildDir; testDir; tempDir ]
+    CleanDirs ["bin"; "temp"]
 )
 
 Target "CleanDocs" (fun _ ->
-    CleanDirs [ "docs/output" ]
+    CleanDirs ["docs/output"]
 )
 
 // --------------------------------------------------------------------------------------
 // Build library & test project
 
-let files includes = 
-  { BaseDirectory = __SOURCE_DIRECTORY__
-    Includes = includes
-    Excludes = [] } 
-
 Target "Build" (fun _ ->
-    files [ "src/Darkseid/" + projectFile ]
+    !! projectFile
     |> MSBuildRelease buildDir "Rebuild"
     |> ignore
 )
@@ -102,11 +117,7 @@ Target "Build" (fun _ ->
 // Run the unit tests using test runner & kill test runner when complete
 
 Target "RunTests" (fun _ ->
-    ActivateFinalTarget "CloseTestRunner"
-
-    { BaseDirectory = __SOURCE_DIRECTORY__
-      Includes = testAssemblies
-      Excludes = [] } 
+    !! testAssemblies
     |> NUnit (fun p ->
         { p with
             DisableShadowCopy = true
@@ -114,35 +125,21 @@ Target "RunTests" (fun _ ->
             OutputFile = "TestResults.xml" })
 )
 
-FinalTarget "CloseTestRunner" (fun _ ->  
-    ProcessHelper.killProcess "nunit-agent.exe"
-)
-
 // --------------------------------------------------------------------------------------
 // Build a NuGet package
 
 Target "NuGet" (fun _ ->
-    // Format the description to fit on a single line (remove \r\n and double-spaces)
-    let description = description.Replace("\r", "")
-                                 .Replace("\n", "")
-                                 .Replace("  ", " ")
-
-    NuGet (fun p -> 
-        { p with   
-            Authors = authors
-            Project = project
-            Summary = summary
-            Description = description
+    Paket.Pack(fun p -> 
+        { p with
+            OutputPath = buildDir
             Version = release.NugetVersion
-            ReleaseNotes = String.Join(Environment.NewLine, release.Notes)
-            Tags = tags
-            OutputPath = "nuget"
-            AccessKey = getBuildParamOrDefault "nugetkey" ""
-            Publish = hasBuildParam "nugetkey"
-            Dependencies = 
-                [ "AWSSDK",  GetPackageVersion "packages" "AWSSDK"
-                  "log4net", GetPackageVersion "packages" "log4net" ] })
-        ("nuget/" + project + ".nuspec")
+            ReleaseNotes = toLines release.Notes})
+)
+
+Target "PublishNuget" (fun _ ->
+    Paket.Push(fun p -> 
+        { p with
+            WorkingDir = buildDir })
 )
 
 // --------------------------------------------------------------------------------------
@@ -176,7 +173,6 @@ Target "Release" DoNothing
 Target "All" DoNothing
 
 "Clean"
-  ==> "RestorePackages"
   ==> "AssemblyInfo"
   ==> "Build"
 //  ==> "RunTests"
@@ -187,6 +183,11 @@ Target "All" DoNothing
 //  ==> "GenerateDocs"
 //  ==> "ReleaseDocs"
   ==> "NuGet"
+
+"NuGet"
+  ==> "PublishNuget"
   ==> "Release"
+
+
 
 RunTargetOrDefault "All"
