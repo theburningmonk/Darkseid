@@ -1,14 +1,12 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Darkseid", "src\Darkseid\Darkseid.fsproj", "{179936E1-BF5C-4737-B27C-E24EA1AA52C0}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{7BC42E26-1A8E-4C63-9A04-E700E8772F6C}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".paket", ".paket", "{90C457A6-49A3-41F2-885C-80477B92CE66}"
 	ProjectSection(SolutionItems) = preProject
-		.nuget\NuGet.Config = .nuget\NuGet.Config
-		.nuget\NuGet.exe = .nuget\NuGet.exe
-		.nuget\NuGet.targets = .nuget\NuGet.targets
+		paket.dependencies = paket.dependencies
 	EndProjectSection
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Darkseid", "src\Darkseid\Darkseid.fsproj", "{179936E1-BF5C-4737-B27C-E24EA1AA52C0}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project", "project", "{B861FA52-E932-4234-9A6A-D71AE8C8770E}"
 	ProjectSection(SolutionItems) = preProject
