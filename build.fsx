@@ -136,6 +136,12 @@ Target "NuGet" (fun _ ->
             ReleaseNotes = toLines release.Notes})
 )
 
+Target "PublishNuget" (fun _ ->
+    Paket.Push(fun p -> 
+        { p with
+            WorkingDir = buildDir })
+)
+
 // --------------------------------------------------------------------------------------
 // Generate the documentation
 
@@ -177,6 +183,11 @@ Target "All" DoNothing
 //  ==> "GenerateDocs"
 //  ==> "ReleaseDocs"
   ==> "NuGet"
+
+"NuGet"
+  ==> "PublishNuget"
   ==> "Release"
+
+
 
 RunTargetOrDefault "All"
