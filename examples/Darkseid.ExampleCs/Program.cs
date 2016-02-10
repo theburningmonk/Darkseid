@@ -54,7 +54,7 @@ namespace Darkseid.ExampleCs
             while (true)
             {
                 var record = new Record(payload, Guid.NewGuid().ToString());
-                await producer.Send(record);
+                await producer.SendAsync(record);
                 await Task.Delay(1);
             }
         }

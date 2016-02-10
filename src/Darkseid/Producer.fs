@@ -31,7 +31,7 @@ type IProducer =
     /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
     ///  1) Blocking mode   : when data is sent to Kinesis
     ///  2) Background mode : when data is accepted into the backlog
-    abstract member Send    : Record -> Task
+    abstract member SendAsync    : Record -> Task
 
 type internal VirmanVundabar (kinesis    : IAmazonKinesis,
                               cloudWatch : IAmazonCloudWatch,
@@ -366,7 +366,7 @@ type Producer private (kinesis      : IAmazonKinesis,
     interface IProducer with        
         [<CLIEvent>] member this.OnError = errorEvent.Publish
 
-        member this.Send (record : Record) = 
+        member this.SendAsync (record : Record) = 
             async {
                 let! res = godfrey.Send(record)
                 match res with
