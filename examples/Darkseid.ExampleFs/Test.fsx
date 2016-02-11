@@ -32,6 +32,6 @@ let payload = [| 1..5000 |] |> Array.map (fun _ -> "42") |> Array.reduce (+) |> 
 
 let send () =
     let record = { Data = payload; PartitionKey = Guid.NewGuid().ToString() }
-    producer.SendAsync(record)
+    producer.Send(record)
 
 [| 1..1000 |] |> Array.iter (fun _ -> Task.Run(fun () -> send()) |> ignore)

@@ -131,7 +131,7 @@ let payload = [| 1..3 |] |> Array.map (fun _ -> "42") |> Array.reduce (+) |> Sys
 
 let send () =
     let record = { Data = payload; PartitionKey = Guid.NewGuid().ToString() }
-    producer.SendAsync(record)
+    producer.Send(record)
 
 let loop = 
     async {

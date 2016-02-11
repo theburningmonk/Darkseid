@@ -31,12 +31,12 @@ type IProducer =
     /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
     ///  1) Blocking mode   : when data is sent to Kinesis
     ///  2) Background mode : when data is accepted into the backlog
-    abstract member SendAsync   : Record -> Task
+    abstract member Send   : Record -> Task
 
     /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
     ///  1) Blocking mode   : when data is sent to Kinesis
     ///  2) Background mode : when data is accepted into the backlog
-    abstract member Send        : Record -> unit
+    abstract member SendSync        : Record -> unit
 
 type internal VirmanVundabar (kinesis    : IAmazonKinesis,
                               cloudWatch : IAmazonCloudWatch,
@@ -303,12 +303,12 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
 
     member this.OnError = errorEvent.Publish
 
-    member this.SendAsync (record) = 
+    member this.Send (record) = 
         if !disposeInvoked > 0 
         then raise ApplicationIsDisposing
         else agent.PostAndAsyncReply (fun reply -> Send(record, reply))
 
-    member this.Send (record) = 
+    member this.SendSync (record) = 
         if !disposeInvoked > 0 
         then raise ApplicationIsDisposing
         else agent.PostAndReply (fun reply -> Send(record, reply))
@@ -376,17 +376,17 @@ type Producer private (kinesis      : IAmazonKinesis,
     interface IProducer with        
         [<CLIEvent>] member this.OnError = errorEvent.Publish
 
-        member this.SendAsync (record : Record) = 
+        member this.Send (record : Record) = 
             async {
-                let! res = godfrey.SendAsync(record)
+                let! res = godfrey.Send(record)
                 match res with
                 | Success _   -> ()
                 | Failure exn -> raise exn
             }
             |> Async.StartAsPlainTask
 
-        member this.Send (record: Record) =
-            let res = godfrey.Send(record)
+        member this.SendSync (record: Record) =
+            let res = godfrey.SendSync(record)
             match res with
             | Success _     -> ()
             | Failure exn   -> raise exn

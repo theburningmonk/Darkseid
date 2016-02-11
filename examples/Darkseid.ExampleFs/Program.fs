@@ -33,7 +33,7 @@ let main argv =
 
     let send () =
         let record = { Data = payload; PartitionKey = Guid.NewGuid().ToString() }
-        producer.SendAsync(record)
+        producer.Send(record)
 
     let loop = 
         async {
