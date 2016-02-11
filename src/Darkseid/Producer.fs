@@ -33,6 +33,11 @@ type IProducer =
     ///  2) Background mode : when data is accepted into the backlog
     abstract member Send    : Record -> Task
 
+    /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
+    ///  1) Blocking mode   : when data is sent to Kinesis
+    ///  2) Background mode : when data is accepted into the backlog
+    abstract member SendSync        : Record -> unit
+
 type internal VirmanVundabar (kinesis    : IAmazonKinesis,
                               cloudWatch : IAmazonCloudWatch,
                               config     : DarkseidConfig,
@@ -303,6 +308,11 @@ type internal GloriousGodfrey (kinesis    : IAmazonKinesis,
         then raise ApplicationIsDisposing
         else agent.PostAndAsyncReply (fun reply -> Send(record, reply))
 
+    member this.SendSync (record) = 
+        if !disposeInvoked > 0 
+        then raise ApplicationIsDisposing
+        else agent.PostAndReply (fun reply -> Send(record, reply))
+
     interface IDisposable with
         member this.Dispose () = 
             GC.SuppressFinalize(this)
@@ -374,6 +384,12 @@ type Producer private (kinesis      : IAmazonKinesis,
                 | Failure exn -> raise exn
             }
             |> Async.StartAsPlainTask
+
+        member this.SendSync (record: Record) =
+            let res = godfrey.SendSync(record)
+            match res with
+            | Success _     -> ()
+            | Failure exn   -> raise exn
 
     interface IDisposable with
         member this.Dispose () = 
