@@ -31,7 +31,7 @@ type IProducer =
     /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
     ///  1) Blocking mode   : when data is sent to Kinesis
     ///  2) Background mode : when data is accepted into the backlog
-    abstract member Send   : Record -> Task
+    abstract member Send    : Record -> Task
 
     /// Sends a data record to Kinesis, depending on the configured mode the task will complete:
     ///  1) Blocking mode   : when data is sent to Kinesis
