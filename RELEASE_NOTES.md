@@ -1,3 +1,6 @@
+#### 0.3.0 - Feb 11, 2016
+* Added new IProducer.SendSync method for a synchronous path
+
 #### 0.2.1 - Aug 26, 2015
 * Updated dependencies of AWSSDK
 * Fix bug related to race conditions accessing the cache (for memoization)
